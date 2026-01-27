@@ -1,10 +1,16 @@
 require('dotenv').config();
 const { ethers } = require('ethers');
 const { Markup, Telegraf } = require('telegraf');
+const http = require('http');
+
+// 1. Render Stay-Alive Server
+// Iske bina Cron-job kaam nahi karega aur Render bot ko band kar dega
+http.createServer((req, res) => {
+    res.write('Stallion Bot is Active!');
+    res.end();
+}).listen(process.env.PORT || 3000);
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
-
-// WebSocket use karein (wss://) .env file mein link change karna mat bhulna
 const provider = new ethers.WebSocketProvider(process.env.RPC_URL);
 const exchangeAddress = process.env.CONTRACT_ADDRESS;
 
@@ -16,7 +22,6 @@ const abi = [
 
 const contract = new ethers.Contract(exchangeAddress, abi, provider);
 
-// --- Button Helper (Professional Buttons) ---
 const getButtons = (txHash) => {
     return Markup.inlineKeyboard([
         [
@@ -29,7 +34,6 @@ const getButtons = (txHash) => {
     ]);
 };
 
-// --- Trade Message Logic ---
 async function handleTrade(type, user, usdt, tokens, price, txHash) {
     const isBuy = type === 'BUY' || type === 'TEST';
     const title = type === 'BUY' ? '🟢 **STALLION BUY DETECTED!** 🚀' : 
@@ -53,29 +57,30 @@ ${title}
             ...getButtons(txHash)
         });
         console.log(`✅ ${type} Alert Sent!`);
-    } catch (e) { console.error("Send Error:", e.description); }
+    } catch (e) { 
+        console.error("Telegram Error:", e.description || "Rate Limit Hit"); 
+    }
 }
 
 console.log("-----------------------------------------");
 console.log("🚀 STALLION TRACKER STARTING...");
 console.log("-----------------------------------------");
 
-// 1. Bought Event Monitor
 contract.on("Bought", (tdate, user, token, usdtIn, tokenOut, price, event) => {
     handleTrade('BUY', user, parseFloat(ethers.formatUnits(usdtIn, 6)), parseFloat(ethers.formatUnits(tokenOut, 18)), parseFloat(ethers.formatUnits(price, 18)), event.log.transactionHash);
 });
 
-// 2. Sold Event Monitor
 contract.on("Sold", (tdate, user, token, tokenIn, usdtOut, price, event) => {
     handleTrade('SELL', user, parseFloat(ethers.formatUnits(usdtOut, 6)), parseFloat(ethers.formatUnits(tokenIn, 18)), parseFloat(ethers.formatUnits(price, 18)), event.log.transactionHash);
 });
 
-// 3. Testing Logic (USDT Tracker ko bhi Professional banaya)
+// --- RATE LIMIT FIX FOR TESTING ---
 if (exchangeAddress.toLowerCase() === "0xc2132d05d31c914a87c6611c10748aeb04b58e8f") {
-    console.log("⚠️ USDT Testing Mode: Professional Alerts Active");
+    console.log("⚠️ USDT Testing Mode: Filtering for BIG transactions only");
     contract.on("Transfer", (from, to, value, event) => {
         const amt = parseFloat(ethers.formatUnits(value, 6));
-        if (amt >= 100) { // $100+ ke trades dikhao test mein
+        // Testing mein sirf $10,000+ ke alerts bhejo taaki Telegram block na kare
+        if (amt >= 10000) { 
             handleTrade('TEST', from, amt, 0, 0, event.log.transactionHash);
         }
     });
@@ -83,5 +88,4 @@ if (exchangeAddress.toLowerCase() === "0xc2132d05d31c914a87c6611c10748aeb04b58e8
 
 bot.launch().then(() => console.log("🤖 Bot Connected Successfully!"));
 
-// Error Handling to prevent crash
 provider.on("error", (e) => console.log("Provider Error:", e));
