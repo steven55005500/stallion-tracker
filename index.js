@@ -80,7 +80,7 @@ if (exchangeAddress.toLowerCase() === "0xc2132d05d31c914a87c6611c10748aeb04b58e8
     contract.on("Transfer", (from, to, value, event) => {
         const amt = parseFloat(ethers.formatUnits(value, 6));
         // Testing mein sirf $10,000+ ke alerts bhejo taaki Telegram block na kare
-        if (amt >= 10000) { 
+        if (amt >= 1000) { 
             handleTrade('TEST', from, amt, 0, 0, event.log.transactionHash);
         }
     });
