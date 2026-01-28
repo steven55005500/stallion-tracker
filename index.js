@@ -3,7 +3,7 @@ const { ethers } = require('ethers');
 const { Markup, Telegraf } = require('telegraf');
 const http = require('http');
 
-// 1. Stay-Alive Server (For Render)
+// 1. Stay-Alive Server (For Render to stay awake)
 http.createServer((req, res) => {
     res.write('Stallion Premium Bot is Running!');
     res.end();
@@ -11,6 +11,7 @@ http.createServer((req, res) => {
 
 console.log("--- Stallion Premium System Startup ---");
 
+// 2. Configuration & RPC Connection
 const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
@@ -24,18 +25,12 @@ const abi = [
 
 const contract = new ethers.Contract(exchangeAddress, abi, provider);
 
-// 2. Join Welcome Logic (Channel Joiners ke liye)
+// 3. Premium Welcome Logic (Channel Joiners)
 bot.on('chat_member', async (ctx) => {
     if (ctx.chatMember.new_chat_member.status === 'member') {
         const name = ctx.chatMember.new_chat_member.user.first_name || "Trader";
-        const welcomeText = `
-🚀 **Welcome to the Stallion Family, ${name}!** 🚀
-
-Aap ab India ke fastest growing exchange community ka hissa hain.
-
-✅ **Live Trade Alerts:** Sab isi channel par milenge.
-🌐 **Website:** [stallion.exchange](https://stallion.exchange)
-        `;
+        const welcomeText = `🚀 **Welcome to the Stallion Family, ${name}!** 🚀\n\nAap ab India ke fastest growing exchange community ka hissa hain.\n\n✅ **Live Trade Alerts:** Sab isi channel par milenge.\n🌐 **Website:** [stallion.exchange](https://stallion.exchange)`;
+        
         try {
             await bot.telegram.sendMessage(process.env.CHANNEL_ID, welcomeText, { parse_mode: 'Markdown' });
             console.log(`👋 Welcome sent for ${name}`);
@@ -43,7 +38,7 @@ Aap ab India ke fastest growing exchange community ka hissa hain.
     }
 });
 
-// 3. Trade Alert UI
+// 4. Trade Alert UI Handler
 async function handleTrade(type, user, usdt, tokens, txHash) {
     const isBuy = type === 'BUY';
     const title = isBuy ? '🟢 **STALLION BUY!** 🚀' : '🔴 **STALLION SELL!** 📉';
@@ -71,37 +66,46 @@ ${title}
     } catch (e) { console.error("❌ Alert Error:", e.message); }
 }
 
-// 4. Optimized Polling
+// 5. High-Performance Polling (HTTP Compatible)
 async function startPolling() {
     console.log("🔍 Monitoring Polygon Chain...");
-    let lastBlock = await provider.getBlockNumber();
-    console.log(`Starting from block: ${lastBlock}`);
+    let lastBlock;
+    try {
+        lastBlock = await provider.getBlockNumber();
+        console.log(`Starting from block: ${lastBlock}`);
+    } catch (e) {
+        console.error("RPC Error:", e.message);
+        return;
+    }
 
     setInterval(async () => {
         try {
             const currentBlock = await provider.getBlockNumber();
             if (currentBlock > lastBlock) {
+                // Fetch Buy Events
                 const boughtLogs = await contract.queryFilter(contract.filters.Bought(), lastBlock + 1, currentBlock);
                 boughtLogs.forEach(log => {
                     handleTrade('BUY', log.args[1], parseFloat(ethers.formatUnits(log.args[3], 6)), parseFloat(ethers.formatUnits(log.args[4], 18)), log.transactionHash);
                 });
 
+                // Fetch Sell Events
                 const soldLogs = await contract.queryFilter(contract.filters.Sold(), lastBlock + 1, currentBlock);
                 soldLogs.forEach(log => {
                     handleTrade('SELL', log.args[1], parseFloat(ethers.formatUnits(log.args[4], 6)), parseFloat(ethers.formatUnits(log.args[3], 18)), log.transactionHash);
                 });
                 lastBlock = currentBlock;
             }
-        } catch (e) { console.error("Polling Error:", e.message); }
+        } catch (e) { console.error("Polling Loop Error:", e.message); }
     }, 15000); 
 }
 
-// 5. Bot Connect
+// 6. Launch Sequence
 async function runBot() {
     try {
         const info = await bot.telegram.getMe();
         console.log(`✅ Bot Identity: @${info.username}`);
 
+        // dropPendingUpdates true rakha hai taaki Conflict error na aaye
         await bot.launch({ dropPendingUpdates: true });
         console.log("🚀 BOT IS NOW FULLY LIVE!");
         
@@ -110,8 +114,12 @@ async function runBot() {
         startPolling();
     } catch (err) { 
         console.error("❌ Startup Failed:", err.message);
-        setTimeout(runBot, 5000); // Auto-retry
+        setTimeout(runBot, 5000); // Retry after 5 seconds
     }
 }
 
 runBot();
+
+// Graceful stop
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
