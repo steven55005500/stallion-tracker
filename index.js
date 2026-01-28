@@ -50,8 +50,7 @@ ${title}
 ━━━━━━━━━━━━━━━━━━━━━━
 💰 **Value:** \`$${usdt.toFixed(2)} USDT\`
 💎 **Amount:** \`${tokens.toLocaleString(undefined, {minimumFractionDigits: 2})} STN\`
-🏷 **Price:** \`$${finalPrice.toFixed(6)} USDT\`
-
+ 
 👤 **User:** [${user.substring(0, 6)}...](https://polygonscan.com/address/${user})
 ${liquidityInfo}
 ━━━━━━━━━━━━━━━━━━━━━━
