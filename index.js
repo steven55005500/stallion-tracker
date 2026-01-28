@@ -12,12 +12,12 @@ http.createServer((req, res) => {
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const provider = new ethers.WebSocketProvider(process.env.RPC_URL);
 
-// 1. EXCHANGE CONTRACT (Jahan events ho rahe hain - Buy/Sell)
+// Contract Address (StallionExchange)
 const exchangeAddress = process.env.CONTRACT_ADDRESS; 
-
-// 2. TOKEN ADDRESS (Jo site par dikh raha hai - Price fetch karne ke liye)
+// Token Address (STN)
 const STALLION_TOKEN_ADDRESS = "0x94Abf62b41f815448eEDBE9eC10f10576D9D6004";
 
+// Exact ABI from your shared Smart Contract
 const abi = [
     "event Bought(uint256 tdate, address indexed user, address indexed token, uint256 usdtIn, uint256 tokenOut, uint256 price)",
     "event Sold(uint256 tdate, address indexed user, address indexed token, uint256 tokenIn, uint256 usdtOut, uint256 price)"
@@ -25,7 +25,7 @@ const abi = [
 
 const contract = new ethers.Contract(exchangeAddress, abi, provider);
 
-// API for live price (Using the correct Token Address)
+// Function to fetch Live Price from DexScreener (Optional Fallback)
 async function getLivePrice() {
     try {
         const response = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${STALLION_TOKEN_ADDRESS}`);
@@ -45,13 +45,16 @@ const getButtons = (txHash) => {
     ]);
 };
 
-async function handleTrade(type, user, usdt, tokens, contractPrice, txHash) {
+async function handleTrade(type, user, usdt, tokens, eventPrice, txHash) {
     const title = type === 'BUY' ? '🟢 **STALLION TOKEN BUY!** 🚀' : '🔴 **STALLION TOKEN SELL!** 📉';
 
     let livePrice = await getLivePrice();
     
-    // Logic: Pehle API Price, phir Contract Price, phir Math (USDT/Tokens)
-    let finalPrice = livePrice || contractPrice;
+    // Aapke contract ke hisab se price 1e18 format mein hai
+    // Agar eventPrice mil raha hai toh woh accurate market rate hai
+    let finalPrice = livePrice || eventPrice;
+
+    // Safety Calculation: Agar price 0 aa jaye toh Math use karein
     if (!finalPrice || finalPrice === 0) {
         finalPrice = (tokens > 0 && usdt > 0) ? (usdt / tokens) : 0;
     }
@@ -60,7 +63,7 @@ async function handleTrade(type, user, usdt, tokens, contractPrice, txHash) {
 ${title}
 ━━━━━━━━━━━━━━━━━━━━━━
 💰 **Value:** \`${usdt.toFixed(2)} USDT\`
-💎 **Tokens:** \`${tokens ? tokens.toLocaleString() : 'N/A'} STN\`
+💎 **Amount:** \`${tokens ? tokens.toLocaleString(undefined, {minimumFractionDigits: 2}) : 'N/A'} STN\`
 🏷 **Price:** \`${finalPrice.toFixed(6)} USDT\`
 
 👤 **User:** [${user.substring(0, 6)}...](https://polygonscan.com/address/${user})
@@ -73,24 +76,40 @@ ${title}
             disable_web_page_preview: true,
             ...getButtons(txHash)
         });
-        console.log(`✅ ${type} Sent! Price: ${finalPrice.toFixed(6)}`);
+        console.log(`✅ Alert Sent: ${type} | Price: ${finalPrice.toFixed(6)}`);
     } catch (e) { 
-        console.error("Telegram Error:", e.description); 
+        console.error("Telegram Error:", e.description || "Connection Error"); 
     }
 }
 
+// ---------------------------------------------------------
+// EVENT LISTENERS (Contract logic ke decimals ke hisab se)
+// ---------------------------------------------------------
+
 contract.on("Bought", (tdate, user, token, usdtIn, tokenOut, price, event) => {
+    // USDT is 6 decimals in your contract
     const usdt = parseFloat(ethers.formatUnits(usdtIn, 6));
+    // STN Token is 18 decimals
     const stn = parseFloat(ethers.formatUnits(tokenOut, 18));
+    // Price in contract is (usdtReserve * 1e18 / tokenReserve)
     const p = parseFloat(ethers.formatUnits(price, 18));
+    
     handleTrade('BUY', user, usdt, stn, p, event.log.transactionHash);
 });
 
 contract.on("Sold", (tdate, user, token, tokenIn, usdtOut, price, event) => {
+    // USDT is 6 decimals
     const usdt = parseFloat(ethers.formatUnits(usdtOut, 6));
+    // STN Token is 18 decimals
     const stn = parseFloat(ethers.formatUnits(tokenIn, 18));
+    // Price is 18 decimals
     const p = parseFloat(ethers.formatUnits(price, 18));
+    
     handleTrade('SELL', user, usdt, stn, p, event.log.transactionHash);
 });
 
-bot.launch().then(() => console.log("🤖 Stallion Bot Connected with Fixes!"));
+bot.launch().then(() => console.log("🤖 Stallion Exchange Bot is LIVE!"));
+
+// Enable graceful stop
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
