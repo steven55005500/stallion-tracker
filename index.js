@@ -3,7 +3,7 @@ const { ethers } = require('ethers');
 const { Markup, Telegraf } = require('telegraf');
 const http = require('http');
 
-// 1. Stay-Alive Server (For Render to stay awake)
+// 1. Stay-Alive Server (For Render)
 http.createServer((req, res) => {
     res.write('Stallion Premium Bot is Running!');
     res.end();
@@ -16,7 +16,6 @@ const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
 const exchangeAddress = process.env.CONTRACT_ADDRESS; 
-const STALLION_TOKEN_ADDRESS = "0x94Abf62b41f815448eEDBE9eC10f10576D9D6004";
 
 const abi = [
     "event Bought(uint256 tdate, address indexed user, address indexed token, uint256 usdtIn, uint256 tokenOut, uint256 price)",
@@ -25,16 +24,26 @@ const abi = [
 
 const contract = new ethers.Contract(exchangeAddress, abi, provider);
 
-// 3. Premium Welcome Logic (Channel Joiners)
+// 3. Premium Welcome Logic
+// Note: Iske liye BotFather mein Privacy Mode OFF hona zaroori hai
 bot.on('chat_member', async (ctx) => {
-    if (ctx.chatMember.new_chat_member.status === 'member') {
+    const status = ctx.chatMember.new_chat_member.status;
+    // Check if the user is a new member or admin
+    if (status === 'member' || status === 'administrator') {
         const name = ctx.chatMember.new_chat_member.user.first_name || "Trader";
-        const welcomeText = `🚀 **Welcome to the Stallion Family, ${name}!** 🚀\n\nAap ab India ke fastest growing exchange community ka hissa hain.\n\n✅ **Live Trade Alerts:** Sab isi channel par milenge.\n🌐 **Website:** [stallion.exchange](https://stallion.exchange)`;
+        
+        // Professional English Welcome Message
+        const welcomeText = `🚀 **Welcome to the Stallion Family, ${name}!** 🚀\n\nYou are now part of India's fastest-growing exchange community.\n\n✅ **Live Trade Alerts:** Get real-time updates directly in this channel.\n🌐 **Official Website:** [stallion.exchange](https://stallion.exchange)\n\nStay tuned for the latest market moves! 📈`;
         
         try {
-            await bot.telegram.sendMessage(process.env.CHANNEL_ID, welcomeText, { parse_mode: 'Markdown' });
-            console.log(`👋 Welcome sent for ${name}`);
-        } catch (e) { console.error("Welcome Error:", e.message); }
+            await ctx.telegram.sendMessage(process.env.CHANNEL_ID, welcomeText, { 
+                parse_mode: 'Markdown',
+                disable_web_page_preview: false 
+            });
+            console.log(`👋 English Welcome message sent for: ${name}`);
+        } catch (e) { 
+            console.error("Welcome Message Error:", e.message); 
+        }
     }
 });
 
@@ -66,7 +75,7 @@ ${title}
     } catch (e) { console.error("❌ Alert Error:", e.message); }
 }
 
-// 5. High-Performance Polling (HTTP Compatible)
+// 5. High-Performance Polling
 async function startPolling() {
     console.log("🔍 Monitoring Polygon Chain...");
     let lastBlock;
@@ -75,6 +84,7 @@ async function startPolling() {
         console.log(`Starting from block: ${lastBlock}`);
     } catch (e) {
         console.error("RPC Error:", e.message);
+        setTimeout(startPolling, 5000);
         return;
     }
 
@@ -84,15 +94,15 @@ async function startPolling() {
             if (currentBlock > lastBlock) {
                 // Fetch Buy Events
                 const boughtLogs = await contract.queryFilter(contract.filters.Bought(), lastBlock + 1, currentBlock);
-                boughtLogs.forEach(log => {
-                    handleTrade('BUY', log.args[1], parseFloat(ethers.formatUnits(log.args[3], 6)), parseFloat(ethers.formatUnits(log.args[4], 18)), log.transactionHash);
-                });
+                for (const log of boughtLogs) {
+                    await handleTrade('BUY', log.args[1], parseFloat(ethers.formatUnits(log.args[3], 6)), parseFloat(ethers.formatUnits(log.args[4], 18)), log.transactionHash);
+                }
 
                 // Fetch Sell Events
                 const soldLogs = await contract.queryFilter(contract.filters.Sold(), lastBlock + 1, currentBlock);
-                soldLogs.forEach(log => {
-                    handleTrade('SELL', log.args[1], parseFloat(ethers.formatUnits(log.args[4], 6)), parseFloat(ethers.formatUnits(log.args[3], 18)), log.transactionHash);
-                });
+                for (const log of soldLogs) {
+                    await handleTrade('SELL', log.args[1], parseFloat(ethers.formatUnits(log.args[4], 6)), parseFloat(ethers.formatUnits(log.args[3], 18)), log.transactionHash);
+                }
                 lastBlock = currentBlock;
             }
         } catch (e) { console.error("Polling Loop Error:", e.message); }
@@ -105,8 +115,12 @@ async function runBot() {
         const info = await bot.telegram.getMe();
         console.log(`✅ Bot Identity: @${info.username}`);
 
-        // dropPendingUpdates true rakha hai taaki Conflict error na aaye
-        await bot.launch({ dropPendingUpdates: true });
+        // dropPendingUpdates: true purane stuck connections clear karega
+        await bot.launch({ 
+            dropPendingUpdates: true,
+            allowedUpdates: ['chat_member', 'message', 'channel_post'] 
+        });
+        
         console.log("🚀 BOT IS NOW FULLY LIVE!");
         
         await bot.telegram.sendMessage(process.env.CHANNEL_ID, "🛡 **Stallion Premium Monitor: Online**\nLive trades and community tracking active.");
@@ -114,7 +128,8 @@ async function runBot() {
         startPolling();
     } catch (err) { 
         console.error("❌ Startup Failed:", err.message);
-        setTimeout(runBot, 5000); // Retry after 5 seconds
+        // Agar conflict (409) hai, toh ye 10 second baad retry karega
+        setTimeout(runBot, 10000); 
     }
 }
 
