@@ -23,7 +23,6 @@ const abi = [
 
 const contract = new ethers.Contract(exchangeAddress, abi, provider);
 
-// Pool se live liquidity fetch karne ka function
 async function getPoolData() {
     try {
         const pData = await contract.pool(STALLION_TOKEN_ADDRESS);
@@ -31,21 +30,17 @@ async function getPoolData() {
             tokenRes: parseFloat(ethers.formatUnits(pData.tokenReserve, 18)),
             usdtRes: parseFloat(ethers.formatUnits(pData.usdtReserve, 6))
         };
-    } catch (e) {
-        return null;
-    }
+    } catch (e) { return null; }
 }
 
 async function handleTrade(type, user, usdt, tokens, eventPrice, txHash) {
     const title = type === 'BUY' ? '🟢 **STALLION BUY!** 🚀' : '🔴 **STALLION SELL!** 📉';
     
-    // Auto-calculate price if event price is 0
-    let finalPrice = eventPrice;
-    if (!finalPrice || finalPrice === 0) {
-        finalPrice = (tokens > 0) ? (usdt / tokens) : 0;
-    }
+    // 🔥 HARD FIX FOR 0.00 PRICE
+    // Pehle manually calculate karo, agar eventPrice zero hai toh ye use hoga
+    let calcPrice = (tokens > 0) ? (usdt / tokens) : 0;
+    let finalPrice = (eventPrice && eventPrice > 0) ? eventPrice : calcPrice;
 
-    // Liquidity check for message
     const pool = await getPoolData();
     const liquidityInfo = pool ? `🌊 **Liquidity:** \`$${pool.usdtRes.toLocaleString()}\`` : '';
 
@@ -73,23 +68,26 @@ ${liquidityInfo}
             ])
         });
         console.log(`✅ ${type} Sent | Price: ${finalPrice.toFixed(6)}`);
-    } catch (e) { 
-        console.error("Telegram Error:", e.description); 
-    }
+    } catch (e) { console.error("Telegram Error:", e.description); }
 }
 
 contract.on("Bought", (tdate, user, token, usdtIn, tokenOut, price, event) => {
-    const usdt = parseFloat(ethers.formatUnits(usdtIn, 6));
-    const stn = parseFloat(ethers.formatUnits(tokenOut, 18));
-    const p = parseFloat(ethers.formatUnits(price, 18));
-    handleTrade('BUY', user, usdt, stn, p, event.log.transactionHash);
+    handleTrade('BUY', user, parseFloat(ethers.formatUnits(usdtIn, 6)), parseFloat(ethers.formatUnits(tokenOut, 18)), parseFloat(ethers.formatUnits(price, 18)), event.log.transactionHash);
 });
 
 contract.on("Sold", (tdate, user, token, tokenIn, usdtOut, price, event) => {
-    const usdt = parseFloat(ethers.formatUnits(usdtOut, 6));
-    const stn = parseFloat(ethers.formatUnits(tokenIn, 18));
-    const p = parseFloat(ethers.formatUnits(price, 18));
-    handleTrade('SELL', user, usdt, stn, p, event.log.transactionHash);
+    handleTrade('SELL', user, parseFloat(ethers.formatUnits(usdtOut, 6)), parseFloat(ethers.formatUnits(tokenIn, 18)), parseFloat(ethers.formatUnits(price, 18)), event.log.transactionHash);
 });
 
-bot.launch().then(() => console.log("🤖 Stallion Premium Bot Active!"));
+// Restart handler to avoid 409 Conflict
+bot.launch().then(() => {
+    console.log("🤖 Stallion Premium Bot Active!");
+}).catch((err) => {
+    if (err.description && err.description.includes("Conflict")) {
+        console.error("❌ Conflict Detected! Please stop other bot instances.");
+        process.exit(1);
+    }
+});
+
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
