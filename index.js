@@ -23,6 +23,7 @@ const abi = [
 
 const contract = new ethers.Contract(exchangeAddress, abi, provider);
 
+// Pool se live liquidity fetch karne ka function
 async function getPoolData() {
     try {
         const pData = await contract.pool(STALLION_TOKEN_ADDRESS);
@@ -36,23 +37,25 @@ async function getPoolData() {
 async function handleTrade(type, user, usdt, tokens, eventPrice, txHash) {
     const title = type === 'BUY' ? '🟢 **STALLION BUY!** 🚀' : '🔴 **STALLION SELL!** 📉';
     
-    // 🔥 HARD FIX FOR 0.00 PRICE
-    // Pehle manually calculate karo, agar eventPrice zero hai toh ye use hoga
+    // 🏷 Price Calculation (0.00 fix)
     let calcPrice = (tokens > 0) ? (usdt / tokens) : 0;
     let finalPrice = (eventPrice && eventPrice > 0) ? eventPrice : calcPrice;
 
+    // 🌊 Liquidity Data from Site/Contract
     const pool = await getPoolData();
-    const liquidityInfo = pool ? `🌊 **Liquidity:** \`$${pool.usdtRes.toLocaleString()}\`` : '';
+    const liquidityInfo = pool ? `🌊 **Liquidity:** \`$${pool.usdtRes.toLocaleString(undefined, {minimumFractionDigits: 2})} USDT\`` : '';
 
     const message = `
 ${title}
 ━━━━━━━━━━━━━━━━━━━━━━
 💰 **Value:** \`$${usdt.toFixed(2)} USDT\`
 💎 **Amount:** \`${tokens.toLocaleString(undefined, {minimumFractionDigits: 2})} STN\`
-🏷 **Price:** \`${finalPrice.toFixed(6)} USDT\`
+🏷 **Price:** \`$${finalPrice.toFixed(6)} USDT\`
 
 👤 **User:** [${user.substring(0, 6)}...](https://polygonscan.com/address/${user})
 ${liquidityInfo}
+━━━━━━━━━━━━━━━━━━━━━━
+🔗 **Tx:** [View Transaction](https://polygonscan.com/tx/${txHash})
 ━━━━━━━━━━━━━━━━━━━━━━
     `;
 
@@ -62,15 +65,18 @@ ${liquidityInfo}
             disable_web_page_preview: true,
             ...Markup.inlineKeyboard([
                 [
-                    Markup.button.url('🌐 Exchange', 'https://stallion.exchange'),
+                    Markup.button.url('🌐 Stallion Exchange', 'https://stallion.exchange'),
                     Markup.button.url('🔍 PolygonScan', `https://polygonscan.com/tx/${txHash}`)
                 ]
             ])
         });
-        console.log(`✅ ${type} Sent | Price: ${finalPrice.toFixed(6)}`);
-    } catch (e) { console.error("Telegram Error:", e.description); }
+        console.log(`✅ ${type} Alert Sent | Price: ${finalPrice.toFixed(6)}`);
+    } catch (e) { 
+        console.error("Telegram Error:", e.description || "Send Error"); 
+    }
 }
 
+// Events
 contract.on("Bought", (tdate, user, token, usdtIn, tokenOut, price, event) => {
     handleTrade('BUY', user, parseFloat(ethers.formatUnits(usdtIn, 6)), parseFloat(ethers.formatUnits(tokenOut, 18)), parseFloat(ethers.formatUnits(price, 18)), event.log.transactionHash);
 });
@@ -79,12 +85,15 @@ contract.on("Sold", (tdate, user, token, tokenIn, usdtOut, price, event) => {
     handleTrade('SELL', user, parseFloat(ethers.formatUnits(usdtOut, 6)), parseFloat(ethers.formatUnits(tokenIn, 18)), parseFloat(ethers.formatUnits(price, 18)), event.log.transactionHash);
 });
 
-// Restart handler to avoid 409 Conflict
-bot.launch().then(() => {
+// Launch with Conflict Fix
+bot.launch({
+    dropPendingUpdates: true // Isse purane conflict aur pending messages clear ho jayenge
+}).then(() => {
     console.log("🤖 Stallion Premium Bot Active!");
 }).catch((err) => {
-    if (err.description && err.description.includes("Conflict")) {
-        console.error("❌ Conflict Detected! Please stop other bot instances.");
+    console.error("❌ Launch Error:", err.message);
+    if (err.message.includes("409")) {
+        console.log("Conflict detected. Restarting...");
         process.exit(1);
     }
 });
