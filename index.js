@@ -32,7 +32,7 @@ bot.on(['new_chat_members', 'chat_member'], async (ctx) => {
         
         if (member && !member.is_bot) {
             const name = member.first_name || "Trader";
-            const welcomeText = `🚀 **Welcome to Stallion Family, ${name}!** 🚀\n\nIndia's most transparent self-growing token economy.\n\n✅ **Live Trade Alerts:** Enabled\n🌐 [stallion.exchange](https://stallion.exchange)\n\nStay tuned for real-time market updates! 📈`;
+            const welcomeText = `🚀 **Welcome to Stallion Family, ${name}!** 🚀\n\nWorld's most transparent self-growing token economy.\n\n✅ **Live Trade Alerts\n🌐 [stallion.exchange](https://stallion.exchange)\n\nStay tuned for real-time market updates! 📈`;
 
             await ctx.replyWithMarkdown(welcomeText, {
                 disable_web_page_preview: false
