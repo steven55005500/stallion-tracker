@@ -23,11 +23,14 @@ const abi = [
 
 const contract = new ethers.Contract(exchangeAddress, abi, provider);
 
-// 3. Welcome Message Logic (Naye member ke join hote hi)
-bot.on('new_chat_members', async (ctx) => {
+// 3. UPDATED Welcome Message Logic
+// Ye logic ab naye members ko har tarah se track karega
+bot.on(['new_chat_members', 'chat_member'], async (ctx) => {
     try {
-        const newMembers = ctx.message.new_chat_members;
-        for (const member of newMembers) {
+        // Naye member ka naam nikalna
+        const member = ctx.message?.new_chat_members?.[0] || ctx.chatMember?.new_chat_member?.user;
+        
+        if (member && !member.is_bot) {
             const name = member.first_name || "Trader";
             const welcomeText = `🚀 **Welcome to Stallion Family, ${name}!** 🚀\n\nIndia's most transparent self-growing token economy.\n\n✅ **Live Trade Alerts:** Enabled\n🌐 [stallion.exchange](https://stallion.exchange)\n\nStay tuned for real-time market updates! 📈`;
 
@@ -45,9 +48,8 @@ bot.on('new_chat_members', async (ctx) => {
 async function handleTrade(type, user, usdt, tokens, txHash) {
     const isBuy = type === 'BUY';
     const icon = isBuy ? '🟢' : '🔴';
-    const whaleIcon = usdt >= 500 ? '🐋🐳 ' : ''; // $500+ trades
+    const whaleIcon = usdt >= 500 ? '🐋🐳 ' : ''; 
     
-    // Price Calculation
     const price = (usdt / tokens).toFixed(6);
     const shortAddr = `${user.substring(0, 6)}...${user.substring(user.length - 4)}`;
 
@@ -67,14 +69,13 @@ ${title}
 📊 **Powered by Stallion Exchange**
     `;
 
-    // Premium Buttons
     const keyboard = Markup.inlineKeyboard([
         [
             Markup.button.url('🌐 Trade Now', 'https://stallion.exchange'),
             Markup.button.url('📈 Live Chart', `https://dexscreener.com/polygon/${exchangeAddress}`)
         ],
         [
-            Markup.button.url('💬 Join Group', 'https://t.me/your_group_link'), // Replace with your link
+            Markup.button.url('💬 Join Group', 'https://t.me/your_group_link'), 
             Markup.button.url('🐦 Twitter', 'https://twitter.com/stallion_ex')
         ]
     ]);
@@ -104,7 +105,6 @@ async function startPolling() {
         try {
             const currentBlock = await provider.getBlockNumber();
             if (currentBlock > lastBlock) {
-                // Fetch Buy Events
                 const boughtLogs = await contract.queryFilter(contract.filters.Bought(), lastBlock + 1, currentBlock);
                 for (const log of boughtLogs) {
                     const usdt = parseFloat(ethers.formatUnits(log.args[3], 6));
@@ -112,7 +112,6 @@ async function startPolling() {
                     await handleTrade('BUY', log.args[1], usdt, stn, log.transactionHash);
                 }
 
-                // Fetch Sell Events
                 const soldLogs = await contract.queryFilter(contract.filters.Sold(), lastBlock + 1, currentBlock);
                 for (const log of soldLogs) {
                     const stn = parseFloat(ethers.formatUnits(log.args[3], 18));
@@ -125,10 +124,14 @@ async function startPolling() {
     }, 15000); 
 }
 
-// 6. Launch Sequence
+// 6. UPDATED Launch Sequence
 async function runBot() {
     try {
-        await bot.launch({ dropPendingUpdates: true });
+        // Specific 'allowed_updates' add kiye hain taaki welcome miss na ho
+        await bot.launch({ 
+            dropPendingUpdates: true,
+            allowedUpdates: ['message', 'chat_member', 'channel_post']
+        });
         console.log("🚀 STALLION PREMIUM IS LIVE!");
         startPolling();
     } catch (err) {
@@ -139,6 +142,5 @@ async function runBot() {
 
 runBot();
 
-// Graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
