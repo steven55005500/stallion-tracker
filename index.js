@@ -79,42 +79,51 @@ ${title}
 }
 
 // 5. History & Live Monitoring Logic
+// 5. High-Performance Batch Monitoring Logic
 async function startMonitoring() {
-    console.log("🔍 Syncing Past Transactions & Starting Live Monitor...");
+    console.log("🔍 Syncing Past Transactions in Batches...");
     let lastBlock;
 
     try {
         const currentBlock = await provider.getBlockNumber();
-        // Pichle 5000 blocks (approx 3-4 ghante) ka data sync karega
-        const fromBlock = currentBlock - 5000; 
+        const startSyncBlock = currentBlock - 2000; // 5000 ki jagah 2000 blocks karte hain safety ke liye
         lastBlock = currentBlock;
 
-        console.log(`Syncing from block ${fromBlock} to ${currentBlock}...`);
+        // Batch size Alchemy Free tier ke hisaab se (10 blocks)
+        const batchSize = 10; 
 
-        // 1. Past Transactions Fetching
-        const pastLogs = await provider.getLogs({
-            address: exchangeAddress,
-            fromBlock: fromBlock,
-            toBlock: currentBlock
-        });
-
-        for (const log of pastLogs) {
+        for (let i = startSyncBlock; i < currentBlock; i += batchSize) {
+            const toBlock = Math.min(i + batchSize - 1, currentBlock);
+            
             try {
-                const parsed = contract.interface.parseLog(log);
-                if (parsed.name === 'Bought') {
-                    const usdt = parseFloat(ethers.formatUnits(parsed.args[3], 6));
-                    const stn = parseFloat(ethers.formatUnits(parsed.args[4], 18));
-                    await handleTrade('BUY', parsed.args[1], usdt, stn, log.transactionHash, true);
-                } else if (parsed.name === 'Sold') {
-                    const stn = parseFloat(ethers.formatUnits(parsed.args[3], 18));
-                    const usdt = parseFloat(ethers.formatUnits(parsed.args[4], 6));
-                    await handleTrade('SELL', parsed.args[1], usdt, stn, log.transactionHash, true);
+                const pastLogs = await provider.getLogs({
+                    address: exchangeAddress,
+                    fromBlock: i,
+                    toBlock: toBlock
+                });
+
+                for (const log of pastLogs) {
+                    const parsed = contract.interface.parseLog(log);
+                    if (parsed.name === 'Bought') {
+                        const usdt = parseFloat(ethers.formatUnits(parsed.args[3], 6));
+                        const stn = parseFloat(ethers.formatUnits(parsed.args[4], 18));
+                        await handleTrade('BUY', parsed.args[1], usdt, stn, log.transactionHash, true);
+                    } else if (parsed.name === 'Sold') {
+                        const stn = parseFloat(ethers.formatUnits(parsed.args[3], 18));
+                        const usdt = parseFloat(ethers.formatUnits(parsed.args[4], 6));
+                        await handleTrade('SELL', parsed.args[1], usdt, stn, log.transactionHash, true);
+                    }
                 }
-            } catch (e) {}
+                // Thoda delay taaki RPC limit hit na ho
+                await new Promise(resolve => setTimeout(resolve, 100)); 
+            } catch (e) {
+                console.error(`Error in batch ${i}:`, e.message);
+            }
         }
+        
         console.log("✅ History Sync Complete. Now monitoring LIVE...");
 
-        // 2. Live Polling
+        // 2. Live Polling (Isme koi dikkat nahi hai)
         setInterval(async () => {
             try {
                 const latest = await provider.getBlockNumber();
@@ -124,7 +133,6 @@ async function startMonitoring() {
                         fromBlock: lastBlock + 1,
                         toBlock: latest
                     });
-
                     for (const log of liveLogs) {
                         try {
                             const parsed = contract.interface.parseLog(log);
@@ -146,7 +154,7 @@ async function startMonitoring() {
 
     } catch (e) {
         console.error("Startup Error:", e.message);
-        setTimeout(startMonitoring, 5000);
+        setTimeout(startMonitoring, 10000);
     }
 }
 
