@@ -23,38 +23,30 @@ const abi = [
 
 const contract = new ethers.Contract(exchangeAddress, abi, provider);
 
-// 3. UPDATED Welcome Message Logic
-// Ye logic ab naye members ko har tarah se track karega
+// 3. Welcome Message Logic
 bot.on(['new_chat_members', 'chat_member'], async (ctx) => {
     try {
-        // Naye member ka naam nikalna
         const member = ctx.message?.new_chat_members?.[0] || ctx.chatMember?.new_chat_member?.user;
-        
         if (member && !member.is_bot) {
             const name = member.first_name || "Trader";
-            const welcomeText = `🚀 **Welcome to Stallion Family, ${name}!** 🚀\n\nWorld's most transparent self-growing token economy.\n\n✅ **Live Trade Alerts\n🌐 [stallion.exchange](https://stallion.exchange)\n\nStay tuned for real-time market updates! 📈`;
-
-            await ctx.replyWithMarkdown(welcomeText, {
-                disable_web_page_preview: false
-            });
-            console.log(`👋 Welcome message sent for: ${name}`);
+            const welcomeText = `🚀 **Welcome to Stallion Family, ${name}!** 🚀\n\nWorld's most transparent self-growing token economy.\n\n✅ **Live Trade Alerts Active**\n🌐 [stallion.exchange](https://stallion.exchange)\n\nStay tuned for real-time market updates! 📈`;
+            await ctx.replyWithMarkdown(welcomeText, { disable_web_page_preview: false });
         }
-    } catch (e) {
-        console.error("Welcome Message Error:", e.message);
-    }
+    } catch (e) { console.error("Welcome Error:", e.message); }
 });
 
 // 4. Advanced Trade Alert Handler
-async function handleTrade(type, user, usdt, tokens, txHash) {
+async function handleTrade(type, user, usdt, tokens, txHash, isHistory = false) {
     const isBuy = type === 'BUY';
     const icon = isBuy ? '🟢' : '🔴';
     const whaleIcon = usdt >= 500 ? '🐋🐳 ' : ''; 
-    
     const price = (usdt / tokens).toFixed(6);
     const shortAddr = `${user.substring(0, 6)}...${user.substring(user.length - 4)}`;
-
-    const title = `${whaleIcon}${icon} **STALLION ${type}** ${icon}`;
     
+    // History alerts ke liye alag tag
+    const historyTag = isHistory ? "🕒 **[PAST TRADE]**\n" : "";
+
+    const title = `${historyTag}${whaleIcon}${icon} **STALLION ${type}** ${icon}`;
     const message = `
 ${title}
 ━━━━━━━━━━━━━━━━━━━━━━
@@ -73,10 +65,6 @@ ${title}
         [
             Markup.button.url('🌐 Trade Now', 'https://stallion.exchange'),
             Markup.button.url('📈 Live Chart', `https://dexscreener.com/polygon/${exchangeAddress}`)
-        ],
-        [
-            Markup.button.url('💬 Join Group', 'https://t.me/your_group_link'), 
-            Markup.button.url('🐦 Twitter', 'https://twitter.com/stallion_ex')
         ]
     ]);
 
@@ -86,56 +74,89 @@ ${title}
             disable_web_page_preview: true,
             ...keyboard
         });
-        console.log(`✅ ${whaleIcon}${type} Alert Sent!`);
+        console.log(`✅ ${isHistory ? 'History' : 'Live'} ${type} Alert Sent!`);
     } catch (e) { console.error("❌ Alert Error:", e.message); }
 }
 
-// 5. High-Performance Polling
-async function startPolling() {
-    console.log("🔍 Monitoring Stallion Protocol...");
+// 5. History & Live Monitoring Logic
+async function startMonitoring() {
+    console.log("🔍 Syncing Past Transactions & Starting Live Monitor...");
     let lastBlock;
+
     try {
-        lastBlock = await provider.getBlockNumber();
+        const currentBlock = await provider.getBlockNumber();
+        // Pichle 5000 blocks (approx 3-4 ghante) ka data sync karega
+        const fromBlock = currentBlock - 5000; 
+        lastBlock = currentBlock;
+
+        console.log(`Syncing from block ${fromBlock} to ${currentBlock}...`);
+
+        // 1. Past Transactions Fetching
+        const pastLogs = await provider.getLogs({
+            address: exchangeAddress,
+            fromBlock: fromBlock,
+            toBlock: currentBlock
+        });
+
+        for (const log of pastLogs) {
+            try {
+                const parsed = contract.interface.parseLog(log);
+                if (parsed.name === 'Bought') {
+                    const usdt = parseFloat(ethers.formatUnits(parsed.args[3], 6));
+                    const stn = parseFloat(ethers.formatUnits(parsed.args[4], 18));
+                    await handleTrade('BUY', parsed.args[1], usdt, stn, log.transactionHash, true);
+                } else if (parsed.name === 'Sold') {
+                    const stn = parseFloat(ethers.formatUnits(parsed.args[3], 18));
+                    const usdt = parseFloat(ethers.formatUnits(parsed.args[4], 6));
+                    await handleTrade('SELL', parsed.args[1], usdt, stn, log.transactionHash, true);
+                }
+            } catch (e) {}
+        }
+        console.log("✅ History Sync Complete. Now monitoring LIVE...");
+
+        // 2. Live Polling
+        setInterval(async () => {
+            try {
+                const latest = await provider.getBlockNumber();
+                if (latest > lastBlock) {
+                    const liveLogs = await provider.getLogs({
+                        address: exchangeAddress,
+                        fromBlock: lastBlock + 1,
+                        toBlock: latest
+                    });
+
+                    for (const log of liveLogs) {
+                        try {
+                            const parsed = contract.interface.parseLog(log);
+                            if (parsed.name === 'Bought') {
+                                const usdt = parseFloat(ethers.formatUnits(parsed.args[3], 6));
+                                const stn = parseFloat(ethers.formatUnits(parsed.args[4], 18));
+                                await handleTrade('BUY', parsed.args[1], usdt, stn, log.transactionHash);
+                            } else if (parsed.name === 'Sold') {
+                                const stn = parseFloat(ethers.formatUnits(parsed.args[3], 18));
+                                const usdt = parseFloat(ethers.formatUnits(parsed.args[4], 6));
+                                await handleTrade('SELL', parsed.args[1], usdt, stn, log.transactionHash);
+                            }
+                        } catch (e) {}
+                    }
+                    lastBlock = latest;
+                }
+            } catch (e) { console.error("Polling Error:", e.message); }
+        }, 15000);
+
     } catch (e) {
-        setTimeout(startPolling, 5000);
-        return;
+        console.error("Startup Error:", e.message);
+        setTimeout(startMonitoring, 5000);
     }
-
-    setInterval(async () => {
-        try {
-            const currentBlock = await provider.getBlockNumber();
-            if (currentBlock > lastBlock) {
-                const boughtLogs = await contract.queryFilter(contract.filters.Bought(), lastBlock + 1, currentBlock);
-                for (const log of boughtLogs) {
-                    const usdt = parseFloat(ethers.formatUnits(log.args[3], 6));
-                    const stn = parseFloat(ethers.formatUnits(log.args[4], 18));
-                    await handleTrade('BUY', log.args[1], usdt, stn, log.transactionHash);
-                }
-
-                const soldLogs = await contract.queryFilter(contract.filters.Sold(), lastBlock + 1, currentBlock);
-                for (const log of soldLogs) {
-                    const stn = parseFloat(ethers.formatUnits(log.args[3], 18));
-                    const usdt = parseFloat(ethers.formatUnits(log.args[4], 6));
-                    await handleTrade('SELL', log.args[1], usdt, stn, log.transactionHash);
-                }
-                lastBlock = currentBlock;
-            }
-        } catch (e) { console.error("Loop Error:", e.message); }
-    }, 15000); 
 }
 
-// 6. UPDATED Launch Sequence
+// 6. Launch Sequence
 async function runBot() {
     try {
-        // Specific 'allowed_updates' add kiye hain taaki welcome miss na ho
-        await bot.launch({ 
-            dropPendingUpdates: true,
-            allowedUpdates: ['message', 'chat_member', 'channel_post']
-        });
+        await bot.launch({ dropPendingUpdates: true });
         console.log("🚀 STALLION PREMIUM IS LIVE!");
-        startPolling();
+        startMonitoring();
     } catch (err) {
-        console.error("Startup Error:", err.message);
         setTimeout(runBot, 10000); 
     }
 }
