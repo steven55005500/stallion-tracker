@@ -23,16 +23,21 @@ const abi = [
 
 const contract = new ethers.Contract(exchangeAddress, abi, provider);
 
-// 3. Welcome Message for New Members
-bot.on('chat_member', async (ctx) => {
-    const status = ctx.chatMember.new_chat_member.status;
-    if (status === 'member' || status === 'administrator') {
-        const name = ctx.chatMember.new_chat_member.user.first_name || "Trader";
-        const welcomeText = `🚀 **Welcome to Stallion Family, ${name}!** 🚀\n\nIndia's most transparent self-growing token economy.\n\n✅ Live Trade Alerts Active\n🌐 [stallion.exchange](https://stallion.exchange)`;
-        
-        try {
-            await ctx.telegram.sendMessage(process.env.CHANNEL_ID, welcomeText, { parse_mode: 'Markdown' });
-        } catch (e) { console.error("Welcome Error:", e.message); }
+// 3. Welcome Message Logic (Naye member ke join hote hi)
+bot.on('new_chat_members', async (ctx) => {
+    try {
+        const newMembers = ctx.message.new_chat_members;
+        for (const member of newMembers) {
+            const name = member.first_name || "Trader";
+            const welcomeText = `🚀 **Welcome to Stallion Family, ${name}!** 🚀\n\nIndia's most transparent self-growing token economy.\n\n✅ **Live Trade Alerts:** Enabled\n🌐 [stallion.exchange](https://stallion.exchange)\n\nStay tuned for real-time market updates! 📈`;
+
+            await ctx.replyWithMarkdown(welcomeText, {
+                disable_web_page_preview: false
+            });
+            console.log(`👋 Welcome message sent for: ${name}`);
+        }
+    } catch (e) {
+        console.error("Welcome Message Error:", e.message);
     }
 });
 
@@ -40,7 +45,7 @@ bot.on('chat_member', async (ctx) => {
 async function handleTrade(type, user, usdt, tokens, txHash) {
     const isBuy = type === 'BUY';
     const icon = isBuy ? '🟢' : '🔴';
-    const whaleIcon = usdt >= 500 ? '🐋🐳 ' : ''; // $500+ par Whale alert
+    const whaleIcon = usdt >= 500 ? '🐋🐳 ' : ''; // $500+ trades
     
     // Price Calculation
     const price = (usdt / tokens).toFixed(6);
@@ -59,7 +64,7 @@ ${title}
 ━━━━━━━━━━━━━━━━━━━━━━
 🔗 [View on PolygonScan](https://polygonscan.com/tx/${txHash})
 ━━━━━━━━━━━━━━━━━━━━━━
-📈 **Powered by Stallion Exchange**
+📊 **Powered by Stallion Exchange**
     `;
 
     // Premium Buttons
@@ -120,18 +125,20 @@ async function startPolling() {
     }, 15000); 
 }
 
-// 6. Launch
+// 6. Launch Sequence
 async function runBot() {
     try {
         await bot.launch({ dropPendingUpdates: true });
         console.log("🚀 STALLION PREMIUM IS LIVE!");
         startPolling();
     } catch (err) {
+        console.error("Startup Error:", err.message);
         setTimeout(runBot, 10000); 
     }
 }
 
 runBot();
 
+// Graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
